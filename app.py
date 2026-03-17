@@ -85,7 +85,7 @@ def procesar_respuesta(texto, numero):
 def enviar_a_whatsapp(cuerpo, numero):
     """Llamada a la Graph API de Meta"""
     # Importante: Reemplazar con tus credenciales reales
-    token_temporal = "EAAKzjv2Ge8YBQxb1m5fiRYSLXsGlvltFpK27yYfvPLPHstL5kccGZBZCQPdrMafg28WU2HeoCnNhynZC6ZCw9r84aPqEdNBjH8DNQtrjjMOlSzOd2ZAOiTTLal9N3leZCGx1rJZATfQ2gXtqhRa9J1tw0twa605z62hblbZB40oWpsLZCr9gVTXMqi9oeGxI5K7qkpvssiU73lSSOiRWPLL6gU7XWWYCJAB7mhafrLq1ZBQGROwA2JM2AbxZAbmUnCnwoNjq8rZBdYkUvMy1LZBk94Kxe1wZDZD"
+    token_temporal = "EAAKzjv2Ge8YBQ0bClXztv7qjaCgAZCuwh0hJypslp1BAZAk4FA0bkSlS3UeJs9srijOmUMXrH3lh6J7tcikYF6bZAlinDHXxhNTDXCpq6DGedfRdp7hqJFxdrk0Xd7F4dQW5AhLMcdA1eBjHMXW6WFm8q2AOZBo88p3ACm97Spd4NMSNAvxZByRE25E2TJ5dGnpTjs4Qn3he2pBgddAd1qZBJaNksR5xTHZBdRIs4z3eqy4XRwGXrbbkEBNnyvuspW3tRxWytqNwv0tgOA8i9yx4AZDZD"
     phone_id = "1077626325424911"
 
     payload = json.dumps({
