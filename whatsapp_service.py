@@ -2,20 +2,18 @@ import http.client
 import json
 
 class WhatsAppService:
-    """Servicio modular para comunicación con Meta API."""
-    
     def __init__(self, config):
-        # Inyectamos la configuración directamente para evitar errores de contexto
+        # Guardamos el objeto config completo
         self.config = config
         
     def _enviar_peticion(self, payload):
-        """Ejecuta el POST hacia la Graph API de Meta."""
+        # Accedemos a la clave WA_TOKEN que definimos en Config
         token = self.config.get('WA_TOKEN')
         phone_id = self.config.get('WA_PHONE_NUMBER_ID')
         
-        # Validación de seguridad: Si no hay token, no intentamos el envío
-        if not token:
-            print("ERROR: No se encontró WHATSAPP_TOKEN en la configuración.", flush=True)
+        # Validación de seguridad con print para el log de Render
+        if not token or token == "PEGAR_AQUI_TU_TOKEN_LARGO_DE_META":
+            print("CRÍTICO: El WHATSAPP_TOKEN sigue sin estar configurado correctamente.", flush=True)
             return None
 
         headers = {
@@ -23,17 +21,18 @@ class WhatsAppService:
             "Authorization": f"Bearer {token}"
         }
         
-        url_path = f"/v19.0/{phone_id}/messages"
         conn = http.client.HTTPSConnection("graph.facebook.com")
-        
         try:
-            conn.request("POST", url_path, json.dumps(payload), headers)
-            response = conn.getresponse()
-            data = response.read().decode()
-            print(f"DEBUG: WhatsApp API {response.status} - {data}", flush=True)
-            return response.status
+            # Usamos v19.0 que es la más estable
+            url = f"/v19.0/{phone_id}/messages"
+            conn.request("POST", url, json.dumps(payload), headers)
+            res = conn.getresponse()
+            data = res.read().decode()
+            
+            print(f"DEBUG: Respuesta Meta API -> {res.status} {data}", flush=True)
+            return res.status
         except Exception as e:
-            print(f"ERROR DE CONEXIÓN API: {e}", flush=True)
+            print(f"ERROR DE CONEXIÓN: {e}", flush=True)
             return None
         finally:
             conn.close()
