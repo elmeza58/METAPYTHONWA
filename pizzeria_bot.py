@@ -1,7 +1,6 @@
 from models import db, Cliente, Pedido
 import json
 
-# --- DATOS DEL NEGOCIO ---
 MENU_PIZZAS = {"familiar": 150, "mediana": 130, "chica": 80}
 MENU_EXTRAS = {"spagguetti": 80, "ensalada": 60, "queso": 100, "soda": 50}
 INGREDIENTES = [
@@ -10,43 +9,36 @@ INGREDIENTES = [
     "Tomate", "Chorizo", "Piña", "Elote", "Cereza", "Chilorio", "Cebolla"
 ]
 
-sesiones = {} # Diccionario temporal para estados
+sesiones = {}
 
 class PizzeriaBot:
     def __init__(self, config, wa_service):
         self.wa = wa_service
         self.config = config
 
-    def gestionar_flujo(self, wa_id, texto, inter_id=None):
-        """Controlador central de la conversación."""
-        # Limpiar número
+    def gestionar_mensaje(self, wa_id, texto, inter_id=None):
         if wa_id.startswith("521"): wa_id = "52" + wa_id[3:]
         
-        # Inicializar sesión si no existe
         if wa_id not in sesiones:
             sesiones[wa_id] = {"paso": "INICIO", "pedido": {"ingredientes": [], "extras": []}, "total": 0}
         
         s = sesiones[wa_id]
         cliente = Cliente.query.filter_by(telefono=wa_id).first()
 
-        # 1. BIENVENIDA Y TAMAÑOS
+        # 1. BIENVENIDA
         if s["paso"] == "INICIO" or texto.lower() == "hola":
             s["paso"] = "TAMAÑO"
-            saludo = f"🍕 ¡Hola *{cliente.nombre if cliente else 'amigo'}*! Bienvenido a Mesa Code Pizza.\n\n¿Qué tamaño de pizza te gustaría ordenar hoy?"
+            nombre_display = cliente.nombre if (cliente and cliente.nombre) else "amigo"
+            saludo = f"🍕 ¡Hola *{nombre_display}*! Bienvenido a Mesa Code Pizza.\n\n¿Qué tamaño de pizza te gustaría ordenar hoy?"
             rows = [{"id": k, "title": k.capitalize(), "description": f"${v}"} for k, v in MENU_PIZZAS.items()]
             return self.wa.enviar_lista(wa_id, "Menú de Pizzas", saludo, "Elige una opción:", "Ver Tamaños", [{"title": "Pizzas", "rows": rows}])
 
-        # 2. SELECCIÓN DE INGREDIENTES
+        # 2. INGREDIENTES
         if s["paso"] == "TAMAÑO":
             s["pedido"]["tamano"] = inter_id
             s["total"] += MENU_PIZZAS[inter_id]
             s["paso"] = "INGREDIENTES"
-            rows = [{"id": f"ing_{i}", "title": ing} for i, ing in enumerate(INGREDIENTES)]
-            # Agregamos opción para terminar si ya no quiere más
-            rows.append({"id": "fin_ing", "title": "🏁 Terminar selección", "description": "Usa esto si ya no quieres más ingredientes"})
-            
-            body = f"Has elegido Pizza {inter_id.capitalize()}.\n\nSelecciona tus ingredientes (3 incluidos, adicionales +$20):"
-            return self.wa.enviar_lista(wa_id, "Ingredientes", body, "Selecciona de la lista:", "Ver Ingredientes", [{"title": "Ingredientes", "rows": rows}])
+            return self._enviar_lista_ingredientes(wa_id, s)
 
         if s["paso"] == "INGREDIENTES":
             if inter_id == "fin_ing":
@@ -56,23 +48,28 @@ class PizzeriaBot:
             if ing_nombre not in s["pedido"]["ingredientes"]:
                 s["pedido"]["ingredientes"].append(ing_nombre)
                 if len(s["pedido"]["ingredientes"]) > 3:
-                    s["total"] += 20 # Cobro extra
+                    s["total"] += 20 # Cobro extra por ingrediente adicional
             
             cant = len(s["pedido"]["ingredientes"])
-            body = f"✅ *{ing_nombre}* añadido ({cant}/3 gratis).\n\n¿Deseas agregar otro o terminar?"
-            buttons = [{"id":"fin_ing","title":"🏁 Terminar"}, {"id":"seguir","title":"➕ Otro ingrediente"}]
+            body = f"✅ *{ing_nombre}* añadido ({cant}/3 incluidos).\n\n¿Deseas agregar otro o pasar a los extras?"
+            buttons = [{"id":"fin_ing","title":"🏁 Finalizar ingredientes"}, {"id":"seguir_ing","title":"➕ Otro ingrediente"}]
             return self.wa.enviar_botones(wa_id, body, buttons)
+            
+        if texto == "➕ Otro ingrediente":
+            return self._enviar_lista_ingredientes(wa_id, s)
 
         # 3. EXTRAS
         if s["paso"] == "EXTRAS":
             if inter_id == "fin_ext":
                 return self._preguntar_entrega(wa_id, s, cliente)
             
-            extra_data = MENU_EXTRAS.get(inter_id)
-            if extra_data:
+            if inter_id in MENU_EXTRAS:
                 s["pedido"]["extras"].append(inter_id)
-                s["total"] += extra_data
-                return self.wa.enviar_botones(wa_id, f"✅ *{inter_id.capitalize()}* añadido. ¿Algo más?", [{"id":"fin_ext","title":"🏁 Finalizar"}, {"id":"mas_ext","title":"🥤 Ver Extras"}])
+                s["total"] += MENU_EXTRAS[inter_id]
+                return self.wa.enviar_botones(wa_id, f"✅ *{inter_id.capitalize()}* añadido. ¿Gustas algo más?", [{"id":"fin_ext","title":"🏁 No, gracias"}, {"id":"mas_ext","title":"🥤 Ver Extras"}])
+            
+            if inter_id == "mas_ext" or texto == "🥤 Ver Extras":
+                return self._pasar_a_extras(wa_id, s)
 
         # 4. ENTREGA Y DIRECCIÓN
         if s["paso"] == "TIPO_ENTREGA":
@@ -81,16 +78,16 @@ class PizzeriaBot:
             
             if cliente and cliente.ultima_direccion:
                 s["paso"] = "CONFIRMAR_DIR"
-                msg = f"¿Usamos la dirección de tu último pedido?\n📍 {cliente.ultima_direccion}"
-                return self.wa.enviar_botones(wa_id, msg, [{"id":"dir_si","title":"✅ Sí"},{"id":"dir_no","title":"✏️ Nueva"}])
+                msg = f"📍 He guardado tu dirección anterior:\n_{cliente.ultima_direccion}_\n\n¿Deseas usar la misma o cambiarla?"
+                return self.wa.enviar_botones(wa_id, msg, [{"id":"dir_si","title":"✅ Usar la misma"},{"id":"dir_no","title":"✏️ Cambiar"}])
             
             s["paso"] = "PEDIR_NOMBRE"
-            return self.wa.enviar_texto(wa_id, "Para el envío, ¿cuál es tu nombre?")
+            return self.wa.enviar_texto(wa_id, "Para tu entrega a domicilio, ¿cuál es tu nombre?")
 
         if s["paso"] == "PEDIR_NOMBRE":
             s["pedido"]["nombre"] = texto
             s["paso"] = "PEDIR_DIR"
-            return self.wa.enviar_texto(wa_id, "Perfecto, ahora dime tu dirección completa:")
+            return self.wa.enviar_texto(wa_id, f"Mucho gusto {texto}. Ahora dime tu dirección completa (Calle, Número y Colonia):")
 
         if s["paso"] == "PEDIR_DIR":
             s["pedido"]["direccion"] = texto
@@ -102,18 +99,22 @@ class PizzeriaBot:
                 s["pedido"]["direccion"] = cliente.ultima_direccion
                 return self._finalizar_orden(wa_id, s, cliente)
             s["paso"] = "PEDIR_DIR"
-            return self.wa.enviar_texto(wa_id, "Dime la nueva dirección de entrega:")
+            return self.wa.enviar_texto(wa_id, "Entendido, dime la nueva dirección de entrega:")
 
-    # --- FUNCIONES AUXILIARES ---
+    # --- PRIVADAS ---
+    def _enviar_lista_ingredientes(self, wa_id, s):
+        rows = [{"id": f"ing_{i}", "title": ing} for i, ing in enumerate(INGREDIENTES)]
+        body = f"Selecciona tus ingredientes para la Pizza {s['pedido']['tamano'].capitalize()}.\n\nRecuerda: 3 incluidos, adicionales +$20 c/u."
+        return self.wa.enviar_lista(wa_id, "Ingredientes", body, "Mesa Code Pizza", "Ver Lista", [{"title": "Ingredientes", "rows": rows}])
+
     def _pasar_a_extras(self, wa_id, s):
         s["paso"] = "EXTRAS"
         rows = [{"id": k, "title": k.capitalize(), "description": f"${v}"} for k, v in MENU_EXTRAS.items()]
-        rows.append({"id": "fin_ext", "title": "🏁 No, gracias", "description": "Continuar al pago"})
-        return self.wa.enviar_lista(wa_id, "Extras", "¿Gustas agregar algún extra o bebida?", "Mesa Code Pizza", "Ver Extras", [{"title": "Extras", "rows": rows}])
+        return self.wa.enviar_lista(wa_id, "Menú de Extras", "¿Gustas acompañar tu pizza con algún extra o bebida?", "Mesa Code Pizza", "Ver Extras", [{"title": "Complementos", "rows": rows}])
 
     def _preguntar_entrega(self, wa_id, s, cliente):
         s["paso"] = "TIPO_ENTREGA"
-        return self.wa.enviar_botones(wa_id, "¿Tu pedido es a domicilio o pasas a recoger?", [{"id":"dom","title":"🛵 Domicilio"},{"id":"rec","title":"🛍️ Recoger"}])
+        return self.wa.enviar_botones(wa_id, "¿Tu pedido es para entregar a domicilio o pasas a recoger?", [{"id":"dom","title":"🛵 Domicilio"},{"id":"rec","title":"🛍️ Recoger"}])
 
     def _guardar_cliente(self, tel, nom, dir):
         c = Cliente.query.filter_by(telefono=tel).first()
@@ -124,19 +125,22 @@ class PizzeriaBot:
         db.session.commit()
 
     def _finalizar_orden(self, wa_id, s, cliente):
-        # Crear registro en BD
         p = Pedido(cliente_id=cliente.id if cliente else None, total=s["total"], detalles_json=json.dumps(s["pedido"]), tipo_entrega=s["pedido"]["entrega"])
         db.session.add(p)
         db.session.commit()
 
-        # Generar Ticket
+        # Ticket Profesional
         ticket = f"🧾 *TICKET DE ORDEN #{p.id}*\n"
-        ticket += f"🍕 Pizza {s['pedido']['tamano'].capitalize()}\n"
-        ticket += f"🧀 Ingredientes: {', '.join(s['pedido']['ingredientes'])}\n"
-        if s["pedido"]["extras"]: ticket += f"🥤 Extras: {', '.join(s['pedido']['extras'])}\n"
+        ticket += f"━━━━━━━━━━━━━━\n"
+        ticket += f"🍕 *Pizza {s['pedido']['tamano'].capitalize()}*\n"
+        ticket += f"🧀 Ing: {', '.join(s['pedido']['ingredientes'])}\n"
+        if s['pedido']['extras']: ticket += f"🥤 Ext: {', '.join(s['pedido']['extras'])}\n"
         ticket += f"📍 Entrega: {s['pedido']['entrega'].capitalize()}\n"
-        ticket += f"💰 *TOTAL: ${s['total']}*\n\n"
-        ticket += "⏳ Tiempo de espera: *40 minutos*.\n¡Gracias por tu compra!"
+        if s['pedido']['entrega'] == "domicilio": ticket += f"🏠 Dir: {s['pedido']['direccion']}\n"
+        ticket += f"━━━━━━━━━━━━━━\n"
+        ticket += f"💰 *TOTAL A PAGAR: ${s['total']}*\n"
+        ticket += f"⏳ Tiempo de espera: *40 min*\n\n"
+        ticket += "¡Gracias por elegir Mesa Code Pizza! 🍕🔥"
         
         sesiones.pop(wa_id)
         return self.wa.enviar_texto(wa_id, ticket)

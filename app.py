@@ -9,7 +9,6 @@ app = Flask(__name__)
 app.config.from_object(Config)
 db.init_app(app)
 
-# Inyección de dependencias profesional
 wa_service = WhatsAppService(app.config)
 bot = PizzeriaBot(app.config, wa_service)
 
@@ -19,7 +18,7 @@ with app.app_context():
 @app.route('/')
 def index():
     from models import Pedido
-    return render_template('index.html', registros=Pedido.query.all())
+    return render_template('index.html', registros=Pedido.query.order_by(Pedido.fecha.desc()).all())
 
 @app.route('/webhook', methods=['GET', 'POST'])
 def webhook():
@@ -34,13 +33,18 @@ def webhook():
         if 'messages' in val:
             msg = val['messages'][0]
             num = msg['from']
-            text = msg.get('text', {}).get('body', '')
+            
+            text_input = ""
             inter_id = None
-            if 'interactive' in msg:
+            
+            if 'text' in msg:
+                text_input = msg['text']['body']
+            elif 'interactive' in msg:
                 type_i = msg['interactive']['type']
                 inter_id = msg['interactive'][type_i]['id']
-            
-            bot.gestionar_mensaje(num, text, inter_id)
+                text_input = msg['interactive'][type_i].get('title', "")
+
+            bot.gestionar_mensaje(num, text_input, inter_id)
         return "OK", 200
     except:
         return "Error", 200
