@@ -1,89 +1,62 @@
-from flask import Flask, request, jsonify, render_template
 import os
-import json
+from flask import Flask, request, jsonify, render_template
 from config import Config
-from models import db, Cliente, Pedido
+from models import db
 from pizzeria_bot import PizzeriaBot
 
-# --- INICIALIZACIÓN DE LA APLICACIÓN ---
+# 1. Crear la instancia de Flask
 app = Flask(__name__)
-# Cargar configuraciones profesionales desde config.py
 app.config.from_object(Config)
 
-# Inicializar Base de Datos
+# 2. Inicializar la base de datos con la app
 db.init_app(app)
 
-# Instanciar el cerebro del bot
-bot = PizzeriaBot()
+# 3. Instanciar el bot pasando app.config explícitamente
+# Esto soluciona el RuntimeError: Working outside of application context
+bot = PizzeriaBot(app.config)
 
-# Crear tablas automáticamente al inicio
+# Crear tablas (en SQLite o PostgreSQL)
 with app.app_context():
     db.create_all()
 
-# --- RUTAS PRINCIPALES ---
-
-@app.route('/', methods=['GET'])
+@app.route('/')
 def index():
-    """Dashboard de visualización para ver logs y pedidos."""
+    # Dashboard para ver pedidos
+    from models import Pedido
     registros = Pedido.query.order_by(Pedido.fecha_pedido.desc()).all()
-    # Enviamos los datos al template
     return render_template('index.html', registros=registros)
 
 @app.route('/webhook', methods=['GET', 'POST'])
 def webhook():
-    """Punto de enlace para el Webhook de Meta."""
     if request.method == 'GET':
-        # Validación del token requerida por Meta
-        verify_token = request.args.get('hub.verify_token')
+        # Validación de Meta
+        token = request.args.get('hub.verify_token')
         challenge = request.args.get('hub.challenge')
-        
-        if challenge and verify_token == app.config['WEBHOOK_VERIFY_TOKEN']:
+        if challenge and token == app.config['WEBHOOK_VERIFY_TOKEN']:
             return challenge, 200
-        return jsonify({'error': 'Token de verificación inválido'}), 401
+        return "Error de validación", 401
     
     elif request.method == 'POST':
         data = request.get_json()
-        print(f"LOG: Payload recibido -> {json.dumps(data)}", flush=True)
-
+        
+        # Validación de estructura de mensaje
         try:
-            # Navegación en el JSON anidado de WhatsApp
-            entry = data['entry'][0]
-            changes = entry['changes'][0]
-            value = changes['value']
-
-            # Ignorar notificaciones que no sean de mensajes (ej. estados de leído)
-            if 'messages' in value:
-                message_obj = value['messages'][0]
-                to_number = message_obj['from'] # Número del remitente
-
-                text_input = ""
-                interactive_input = None
+            val = data['entry'][0]['changes'][0]['value']
+            if 'messages' in val:
+                msg = val['messages'][0]
+                num = msg['from']
                 
-                # Identificar si es mensaje de texto o interactivo
-                if 'text' in message_obj:
-                    text_input = message_obj['text']['body']
-                elif 'interactive' in message_obj:
-                    # Capturar la respuesta interactiva (botón o lista)
-                    interactive_obj = message_obj['interactive']
-                    tipo_i = interactive_obj['type']
-                    # El ID del elemento suele ser la clave para la lógica
-                    interactive_input = interactive_obj[tipo_i]['id']
-                    text_input = interactive_obj[tipo_i]['title']
-
-                # --- LLAMADA AL CEREBRO DEL BOT ---
-                if text_input or interactive_input:
-                    bot.procesar_mensaje_entrante(to_number, text_input, interactive_input)
-            
-            # Responder siempre con 200 OK a Meta para evitar bloqueos
+                text = msg.get('text', {}).get('body', '')
+                inter = msg.get('interactive', {}).get(msg.get('interactive', {}).get('type', ''), {}).get('id')
+                
+                # Ejecutar lógica del bot
+                bot.procesar_mensaje_entrante(num, text, inter)
+                
             return jsonify({"status": "ok"}), 200
-            
         except Exception as e:
-            # Captura y log profesional de errores técnicos
-            print(f"ERROR: Fallo crítico al procesar webhook -> {str(e)}", flush=True)
-            # Responder siempre 200 OK para no bloquear el webhook de Meta
+            print(f"DEBUG ERROR WEBHOOK: {e}", flush=True)
             return jsonify({"status": "error"}), 200
 
 if __name__ == '__main__':
-    # Configuración dinámica del puerto para entornos como Render
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port, debug=True)
