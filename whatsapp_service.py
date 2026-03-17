@@ -3,19 +3,13 @@ import json
 
 class WhatsAppService:
     def __init__(self, config):
-        # Guardamos el objeto config completo
         self.config = config
-        
-    def _enviar_peticion(self, payload):
-        # Accedemos a la clave WA_TOKEN que definimos en Config
+
+    def _enviar(self, payload):
+        """Ejecuta la petición POST a Meta."""
         token = self.config.get('WA_TOKEN')
         phone_id = self.config.get('WA_PHONE_NUMBER_ID')
         
-        # Validación de seguridad con print para el log de Render
-        if not token or token == "PEGAR_AQUI_TU_TOKEN_LARGO_DE_META":
-            print("CRÍTICO: El WHATSAPP_TOKEN sigue sin estar configurado correctamente.", flush=True)
-            return None
-
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {token}"
@@ -23,25 +17,33 @@ class WhatsAppService:
         
         conn = http.client.HTTPSConnection("graph.facebook.com")
         try:
-            # Usamos v19.0 que es la más estable
-            url = f"/v19.0/{phone_id}/messages"
-            conn.request("POST", url, json.dumps(payload), headers)
+            conn.request("POST", f"/v20.0/{phone_id}/messages", json.dumps(payload), headers)
             res = conn.getresponse()
-            data = res.read().decode()
-            
-            print(f"DEBUG: Respuesta Meta API -> {res.status} {data}", flush=True)
+            print(f"DEBUG API: {res.status} {res.read().decode()}", flush=True)
             return res.status
-        except Exception as e:
-            print(f"ERROR DE CONEXIÓN: {e}", flush=True)
-            return None
         finally:
             conn.close()
 
-    def enviar_texto(self, to_number, text_body):
+    def enviar_texto(self, to, text):
+        return self._enviar({"messaging_product": "whatsapp", "to": to, "type": "text", "text": {"body": text}})
+
+    def enviar_botones(self, to, text, buttons):
         payload = {
-            "messaging_product": "whatsapp",
-            "to": to_number,
-            "type": "text",
-            "text": {"body": text_body}
+            "messaging_product": "whatsapp", "to": to, "type": "interactive",
+            "interactive": {
+                "type": "button", "body": {"text": text},
+                "action": {"buttons": [{"type": "reply", "reply": b} for b in buttons]}
+            }
         }
-        return self._enviar_peticion(payload)
+        return self._enviar(payload)
+
+    def enviar_lista(self, to, header, body, footer, button_text, sections):
+        payload = {
+            "messaging_product": "whatsapp", "to": to, "type": "interactive",
+            "interactive": {
+                "type": "list", "header": {"type": "text", "text": header},
+                "body": {"text": body}, "footer": {"type": "text", "text": footer},
+                "action": {"button": button_text, "sections": sections}
+            }
+        }
+        return self._enviar(payload)
