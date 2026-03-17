@@ -1,3 +1,4 @@
+# ~/Documents/APIMETAPYTHON/pizzeria_bot.py
 from models import db, Cliente, Pedido
 import json
 
@@ -9,140 +10,161 @@ INGREDIENTES = [
     "Tomate", "Chorizo", "Piña", "Elote", "Cereza", "Chilorio", "Cebolla"
 ]
 
-sesiones = {}
-
 class PizzeriaBot:
     def __init__(self, config, wa_service):
         self.wa = wa_service
         self.config = config
 
     def gestionar_mensaje(self, wa_id, texto, inter_id=None):
+        # 1. Normalización de número de México
         if wa_id.startswith("521"): wa_id = "52" + wa_id[3:]
         
-        # Reset total si el usuario escribe Hola para empezar de cero
-        if texto.lower() == "hola":
-            sesiones[wa_id] = {"paso": "INICIO", "pedido": {"ingredientes": [], "extras": []}, "total": 0}
-        
-        if wa_id not in sesiones:
-            sesiones[wa_id] = {"paso": "INICIO", "pedido": {"ingredientes": [], "extras": []}, "total": 0}
-        
-        s = sesiones[wa_id]
+        # 2. Obtener cliente de la DB (o crear uno nuevo)
         cliente = Cliente.query.filter_by(telefono=wa_id).first()
+        if not cliente:
+            cliente = Cliente(telefono=wa_id)
+            db.session.add(cliente)
+            db.session.commit()
 
-        # --- FLUJO CON ELIF (Solo entra en UN paso por mensaje) ---
+        # 3. Resetear si escribe 'Hola'
+        if texto.lower() == "hola":
+            cliente.paso_actual = "INICIO"
+            cliente.pedido_temporal = json.dumps({"ingredientes": [], "extras": [], "total": 0})
+            db.session.commit()
 
-        # 1. BIENVENIDA
-        if s["paso"] == "INICIO":
-            s["paso"] = "TAMAÑO"
-            nombre_display = cliente.nombre if (cliente and cliente.nombre) else "amigo"
-            saludo = f"🍕 ¡Hola *{nombre_display}*! Bienvenido a Mesa Code Pizza.\n\n¿Qué tamaño de pizza te gustaría ordenar hoy?"
+        # 4. Cargar datos de la sesión desde la DB
+        paso = cliente.paso_actual
+        pedido_temp = json.loads(cliente.pedido_temporal)
+
+        # --- FLUJO DE ESTADOS ---
+
+        # ESTADO 1: BIENVENIDA
+        if paso == "INICIO":
+            cliente.paso_actual = "TAMAÑO"
+            db.session.commit()
+            
+            nombre = cliente.nombre if cliente.nombre else "amigo"
+            saludo = f"🍕 ¡Hola *{nombre}*! Bienvenido a Mesa Code Pizza.\n\n¿Qué tamaño de pizza te gustaría ordenar?"
             rows = [{"id": k, "title": k.capitalize(), "description": f"${v}"} for k, v in MENU_PIZZAS.items()]
-            return self.wa.enviar_lista(wa_id, "Menú de Pizzas", saludo, "Elige una opción:", "Ver Tamaños", [{"title": "Pizzas", "rows": rows}])
+            return self.wa.enviar_lista(wa_id, "Menú", saludo, "Elige uno:", "Ver Tamaños", [{"title": "Pizzas", "rows": rows}])
 
-        # 2. PROCESAR TAMAÑO Y PEDIR INGREDIENTES
-        elif s["paso"] == "TAMAÑO":
+        # ESTADO 2: SELECCIÓN DE TAMAÑO
+        elif paso == "TAMAÑO":
             if not inter_id or inter_id not in MENU_PIZZAS:
-                return self.wa.enviar_texto(wa_id, "⚠️ Por favor, selecciona un tamaño de la lista de arriba.")
+                return self.wa.enviar_texto(wa_id, "⚠️ Selecciona un tamaño de la lista.")
             
-            s["pedido"]["tamano"] = inter_id
-            s["total"] += MENU_PIZZAS[inter_id]
-            s["paso"] = "INGREDIENTES"
-            return self._enviar_lista_ingredientes(wa_id, s)
+            pedido_temp["tamano"] = inter_id
+            pedido_temp["total"] = MENU_PIZZAS[inter_id]
+            
+            cliente.paso_actual = "INGREDIENTES"
+            cliente.pedido_temporal = json.dumps(pedido_temp)
+            db.session.commit()
+            
+            return self._enviar_lista_ingredientes(wa_id)
 
-        # 3. PROCESAR INGREDIENTES
-        elif s["paso"] == "INGREDIENTES":
-            if inter_id == "fin_ing" or texto == "🏁 Finalizar ingredientes":
-                return self._pasar_a_extras(wa_id, s)
+        # ESTADO 3: INGREDIENTES
+        elif paso == "INGREDIENTES":
+            if inter_id == "fin_ing":
+                return self._pasar_a_extras(wa_id, cliente, pedido_temp)
             
-            # Validar que el ID sea de un ingrediente
             if inter_id and inter_id.startswith("ing_"):
-                ing_idx = int(inter_id.split("_")[1])
-                ing_nombre = INGREDIENTES[ing_idx]
+                idx = int(inter_id.split("_")[1])
+                ing = INGREDIENTES[idx]
                 
-                if ing_nombre not in s["pedido"]["ingredientes"]:
-                    s["pedido"]["ingredientes"].append(ing_nombre)
-                    if len(s["pedido"]["ingredientes"]) > 3:
-                        s["total"] += 20 # Cobro extra
+                if ing not in pedido_temp["ingredientes"]:
+                    pedido_temp["ingredientes"].append(ing)
+                    if len(pedido_temp["ingredientes"]) > 3:
+                        pedido_temp["total"] += 20 # Extra
                 
-                cant = len(s["pedido"]["ingredientes"])
-                body = f"✅ *{ing_nombre}* añadido ({cant}/3 incluidos).\n\n¿Deseas agregar otro o pasar a los extras?"
-                buttons = [{"id":"fin_ing","title":"🏁 Finalizar"}, {"id":"seguir_ing","title":"➕ Otro ingrediente"}]
+                cliente.pedido_temporal = json.dumps(pedido_temp)
+                db.session.commit()
+                
+                cant = len(pedido_temp["ingredientes"])
+                body = f"✅ *{ing}* añadido ({cant}/3 gratis).\n\n¿Deseas otro o pasar a los extras?"
+                buttons = [{"id":"fin_ing","title":"🏁 Finalizar"}, {"id":"seguir_ing","title":"➕ Otro"}]
                 return self.wa.enviar_botones(wa_id, body, buttons)
             
-            elif texto == "➕ Otro ingrediente":
-                return self._enviar_lista_ingredientes(wa_id, s)
+            if texto == "➕ Otro":
+                return self._enviar_lista_ingredientes(wa_id)
 
-        # 4. PROCESAR EXTRAS
-        elif s["paso"] == "EXTRAS":
-            if inter_id == "fin_ext" or texto == "🏁 No, gracias":
-                return self._preguntar_entrega(wa_id, s, cliente)
+        # ESTADO 4: EXTRAS
+        elif paso == "EXTRAS":
+            if inter_id == "fin_ext":
+                return self._preguntar_entrega(wa_id, cliente)
             
             if inter_id in MENU_EXTRAS:
-                s["pedido"]["extras"].append(inter_id)
-                s["total"] += MENU_EXTRAS[inter_id]
-                return self.wa.enviar_botones(wa_id, f"✅ *{inter_id.capitalize()}* añadido. ¿Gustas algo más?", [{"id":"fin_ext","title":"🏁 No, gracias"}, {"id":"mas_ext","title":"🥤 Ver Extras"}])
-            
-            if inter_id == "mas_ext" or texto == "🥤 Ver Extras":
-                return self._pasar_a_extras(wa_id, s)
+                pedido_temp["extras"].append(inter_id)
+                pedido_temp["total"] += MENU_EXTRAS[inter_id]
+                cliente.pedido_temporal = json.dumps(pedido_temp)
+                db.session.commit()
+                
+                return self.wa.enviar_botones(wa_id, f"✅ {inter_id.capitalize()} añadido. ¿Algo más?", 
+                                           [{"id":"fin_ext","title":"🏁 Finalizar"}, {"id":"mas_ext","title":"🥤 Ver Extras"}])
+            return self._pasar_a_extras(wa_id, cliente, pedido_temp)
 
-        # 5. TIPO DE ENTREGA
-        elif s["paso"] == "TIPO_ENTREGA":
-            s["pedido"]["entrega"] = "domicilio" if inter_id == "dom" else "recoger"
-            if inter_id == "rec": return self._finalizar_orden(wa_id, s, cliente)
+        # ESTADO 5: ENTREGA
+        elif paso == "TIPO_ENTREGA":
+            pedido_temp["entrega"] = "domicilio" if inter_id == "dom" else "recoger"
+            cliente.pedido_temporal = json.dumps(pedido_temp)
             
-            if cliente and cliente.ultima_direccion:
-                s["paso"] = "CONFIRMAR_DIR"
+            if inter_id == "rec": 
+                return self._finalizar_orden(wa_id, cliente, pedido_temp)
+            
+            if cliente.ultima_direccion:
+                cliente.paso_actual = "CONFIRMAR_DIR"
+                db.session.commit()
                 msg = f"📍 ¿Enviamos a tu dirección anterior?\n_{cliente.ultima_direccion}_"
                 return self.wa.enviar_botones(wa_id, msg, [{"id":"dir_si","title":"✅ Sí"},{"id":"dir_no","title":"✏️ Otra"}])
             
-            s["paso"] = "PEDIR_NOMBRE"
-            return self.wa.enviar_texto(wa_id, "Para el envío, ¿cuál es tu nombre?")
+            cliente.paso_actual = "PEDIR_NOMBRE"
+            db.session.commit()
+            return self.wa.enviar_texto(wa_id, "¿Cuál es tu nombre?")
 
-        # 6. DATOS DE ENVÍO
-        elif s["paso"] == "CONFIRMAR_DIR":
+        # ESTADOS DE DIRECCIÓN
+        elif paso == "CONFIRMAR_DIR":
             if inter_id == "dir_si":
-                s["pedido"]["direccion"] = cliente.ultima_direccion
-                return self._finalizar_orden(wa_id, s, cliente)
-            s["paso"] = "PEDIR_DIR"
-            return self.wa.enviar_texto(wa_id, "Dime la nueva dirección de entrega:")
+                pedido_temp["direccion"] = cliente.ultima_direccion
+                return self._finalizar_orden(wa_id, cliente, pedido_temp)
+            cliente.paso_actual = "PEDIR_DIR"
+            db.session.commit()
+            return self.wa.enviar_texto(wa_id, "Escribe la dirección de entrega:")
 
-        elif s["paso"] == "PEDIR_NOMBRE":
-            s["pedido"]["nombre"] = texto
-            s["paso"] = "PEDIR_DIR"
-            return self.wa.enviar_texto(wa_id, f"Gracias {texto}. Ahora dime tu dirección completa:")
+        elif paso == "PEDIR_NOMBRE":
+            cliente.nombre = texto
+            cliente.paso_actual = "PEDIR_DIR"
+            db.session.commit()
+            return self.wa.enviar_texto(wa_id, "Dime tu dirección completa:")
 
-        elif s["paso"] == "PEDIR_DIR":
-            s["pedido"]["direccion"] = texto
-            self._guardar_cliente(wa_id, s["pedido"].get("nombre"), texto)
-            return self._finalizar_orden(wa_id, s, cliente)
+        elif paso == "PEDIR_DIR":
+            cliente.ultima_direccion = texto
+            pedido_temp["direccion"] = texto
+            db.session.commit()
+            return self._finalizar_orden(wa_id, cliente, pedido_temp)
 
-    # --- FUNCIONES DE APOYO ---
-    def _enviar_lista_ingredientes(self, wa_id, s):
+    # --- MÉTODOS DE APOYO ---
+    def _enviar_lista_ingredientes(self, wa_id):
         rows = [{"id": f"ing_{i}", "title": ing} for i, ing in enumerate(INGREDIENTES)]
-        return self.wa.enviar_lista(wa_id, "Ingredientes", "Selecciona tus ingredientes (3 incluidos):", "Mesa Code Pizza", "Ver Lista", [{"title": "Ingredientes", "rows": rows}])
+        return self.wa.enviar_lista(wa_id, "Ingredientes", "Selecciona tus ingredientes:", "Mesa Code", "Ver Lista", [{"title": "Opciones", "rows": rows}])
 
-    def _pasar_a_extras(self, wa_id, s):
-        s["paso"] = "EXTRAS"
+    def _pasar_a_extras(self, wa_id, cliente, pedido_temp):
+        cliente.paso_actual = "EXTRAS"
+        db.session.commit()
         rows = [{"id": k, "title": k.capitalize(), "description": f"${v}"} for k, v in MENU_EXTRAS.items()]
-        return self.wa.enviar_lista(wa_id, "Extras", "¿Gustas algún extra?", "Mesa Code Pizza", "Ver Extras", [{"title": "Complementos", "rows": rows}])
+        return self.wa.enviar_lista(wa_id, "Extras", "¿Gustas algún extra?", "Mesa Code", "Ver Extras", [{"title": "Extras", "rows": rows}])
 
-    def _preguntar_entrega(self, wa_id, s, cliente):
-        s["paso"] = "TIPO_ENTREGA"
-        return self.wa.enviar_botones(wa_id, "¿Es a domicilio o recoges en local?", [{"id":"dom","title":"🛵 Domicilio"},{"id":"rec","title":"🛍️ Recoger"}])
-
-    def _guardar_cliente(self, tel, nom, dir):
-        c = Cliente.query.filter_by(telefono=tel).first()
-        if not c: c = Cliente(telefono=tel)
-        if nom: c.nombre = nom
-        c.ultima_direccion = dir
-        db.session.add(c)
+    def _preguntar_entrega(self, wa_id, cliente):
+        cliente.paso_actual = "TIPO_ENTREGA"
         db.session.commit()
+        return self.wa.enviar_botones(wa_id, "¿Es a domicilio o recoges?", [{"id":"dom","title":"🛵 Domicilio"},{"id":"rec","title":"🛍️ Recoger"}])
 
-    def _finalizar_orden(self, wa_id, s, cliente):
-        p = Pedido(cliente_id=cliente.id if cliente else None, total=s["total"], detalles_json=json.dumps(s["pedido"]), tipo_entrega=s["pedido"]["entrega"])
+    def _finalizar_orden(self, wa_id, cliente, pedido_temp):
+        p = Pedido(cliente_id=cliente.id, total=pedido_temp["total"], detalles_json=json.dumps(pedido_temp), tipo_entrega=pedido_temp["entrega"])
         db.session.add(p)
+        
+        # Resetear cliente para el próximo pedido
+        cliente.paso_actual = "INICIO"
+        cliente.pedido_temporal = json.dumps({"ingredientes": [], "extras": [], "total": 0})
         db.session.commit()
 
-        ticket = f"🧾 *TICKET #{p.id}*\n🍕 Pizza {s['pedido']['tamano'].capitalize()}\n🧀 Ing: {', '.join(s['pedido']['ingredientes'])}\n🥤 Ext: {', '.join(s['pedido']['extras'])}\n💰 *TOTAL: ${s['total']}*\n⏳ Tiempo: *40 min*."
-        sesiones.pop(wa_id)
+        ticket = f"🧾 *ORDEN #{p.id}*\n🍕 Pizza {pedido_temp['tamano'].capitalize()}\n🧀 Ing: {', '.join(pedido_temp['ingredientes'])}\n💰 *TOTAL: ${pedido_temp['total']}*\n⏳ Tiempo: *40 min*."
         return self.wa.enviar_texto(wa_id, ticket)
