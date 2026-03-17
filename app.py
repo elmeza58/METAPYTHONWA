@@ -120,8 +120,11 @@ def enviar_a_whatsapp(cuerpo, numero):
     """
     Realiza la petición HTTP POST a la Graph API de Meta para enviar el mensaje.
     """
-    # Priorizar variables de entorno para seguridad; fallback a valores de desarrollo
-    token_acceso = os.environ.get("WHATSAPP_TOKEN", "TU_TOKEN_TEMPORAL_AQUI")
+    # El primer parámetro es el nombre de la variable en Render. 
+    # El segundo parámetro (el string largo) es el que usará si Render no tiene la variable configurada.
+    token_acceso = os.environ.get("WHATSAPP_TOKEN", "EAAKzjv2Ge8YBQ8agFuZAc1fnJESl49Pxsku320zAGx6XJxYAk6IZA8ommyxvtawfR7JZAhbhEgYNvJfP3kL1rCm55ZAJZBMpGRfBxLb7pv0CLWiWXELfTgINNaXV42HpCPsRT6pL7HbWOQMn6PEUZBjEM0oTFaMKSEUQDAtyQsjOfUQ2ZBDtqcpBf82clgMTarHV0NFrKNuEO6ak2tZCefUIF7T3ZBJA3ZBTZCuZBJSpUFV91ZB8gp2TqcUqGAuz5sadLMyvN45y2As10LwO2KsyQrdrLpgZDZD")
+    
+    # Asegúrate de que este ID sea el tuyo: 1077626325424911
     phone_id = os.environ.get("PHONE_ID", "1077626325424911")
 
     payload = json.dumps({
@@ -137,19 +140,15 @@ def enviar_a_whatsapp(cuerpo, numero):
         "Authorization": f"Bearer {token_acceso}"
     }
 
-    # Implementación nativa con http.client (evita dependencias externas como 'requests')
     conn = http.client.HTTPSConnection("graph.facebook.com")
     try:
-        # v19.0 es la versión estable recomendada para integraciones educativas
+        # Usamos v19.0 o v20.0
         conn.request("POST", f"/v19.0/{phone_id}/messages", payload, headers)
         res = conn.getresponse()
         data_res = res.read().decode()
-        
-        # Log de diagnóstico para verificar el estado en el panel de Render
-        print(f"META API RESPONSE: {res.status} - {data_res}", flush=True)
-        
+        print(f"DEBUG: Respuesta Meta -> {res.status} {data_res}", flush=True)
     except Exception as e:
-        print(f"SYSTEM ERROR: Error de conexión con Meta -> {e}", flush=True)
+        print(f"ERROR DE CONEXIÓN: {e}", flush=True)
     finally:
         conn.close()
 
