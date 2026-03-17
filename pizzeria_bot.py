@@ -1,85 +1,121 @@
 from models import db, Cliente, Pedido
 import json
 
-# Datos extraídos de tus capturas
-MENU_PRECIOS = {"familiar": 150, "mediana": 130, "chica": 80}
-INGREDIENTES_LISTA = [
+# --- DATOS DEL NEGOCIO ---
+MENU_PIZZAS = {"familiar": 150, "mediana": 130, "chica": 80}
+MENU_EXTRAS = {"spagguetti": 80, "ensalada": 60, "queso": 100, "soda": 50}
+INGREDIENTES = [
     "Jamón", "Salami", "Peperoni", "Tocino", "Machaca", "Jalapeño", 
     "Aceituna", "Atún", "Salchicha", "Champiñones", "Pimientos", 
     "Tomate", "Chorizo", "Piña", "Elote", "Cereza", "Chilorio", "Cebolla"
 ]
 
-# Diccionario de estados en memoria
-sesiones = {}
+sesiones = {} # Diccionario temporal para estados
 
 class PizzeriaBot:
     def __init__(self, config, wa_service):
         self.wa = wa_service
         self.config = config
 
-    def gestionar_mensaje(self, wa_id, texto, inter_id=None):
-        # Normalizar número México
-        if wa_id.startswith("521") and len(wa_id) == 13: wa_id = "52" + wa_id[3:]
+    def gestionar_flujo(self, wa_id, texto, inter_id=None):
+        """Controlador central de la conversación."""
+        # Limpiar número
+        if wa_id.startswith("521"): wa_id = "52" + wa_id[3:]
         
+        # Inicializar sesión si no existe
         if wa_id not in sesiones:
-            sesiones[wa_id] = {"paso": "INICIO", "pedido": {"ingredientes": []}}
+            sesiones[wa_id] = {"paso": "INICIO", "pedido": {"ingredientes": [], "extras": []}, "total": 0}
         
         s = sesiones[wa_id]
         cliente = Cliente.query.filter_by(telefono=wa_id).first()
 
-        # --- FLUJO ---
+        # 1. BIENVENIDA Y TAMAÑOS
         if s["paso"] == "INICIO" or texto.lower() == "hola":
             s["paso"] = "TAMAÑO"
-            saludo = f"🍕 ¡Hola {cliente.nombre if cliente else ''}! Bienvenido a Mesa Code Pizza.\n¿Qué tamaño deseas?"
-            rows = [{"id": k, "title": k.capitalize(), "description": f"${v}"} for k, v in MENU_PRECIOS.items()]
-            return self.wa.enviar_lista(wa_id, "Menú", saludo, "Elige uno:", "Ver Tamaños", [{"title": "Pizzas", "rows": rows}])
+            saludo = f"🍕 ¡Hola *{cliente.nombre if cliente else 'amigo'}*! Bienvenido a Mesa Code Pizza.\n\n¿Qué tamaño de pizza te gustaría ordenar hoy?"
+            rows = [{"id": k, "title": k.capitalize(), "description": f"${v}"} for k, v in MENU_PIZZAS.items()]
+            return self.wa.enviar_lista(wa_id, "Menú de Pizzas", saludo, "Elige una opción:", "Ver Tamaños", [{"title": "Pizzas", "rows": rows}])
 
+        # 2. SELECCIÓN DE INGREDIENTES
         if s["paso"] == "TAMAÑO":
             s["pedido"]["tamano"] = inter_id
+            s["total"] += MENU_PIZZAS[inter_id]
             s["paso"] = "INGREDIENTES"
-            rows = [{"id": f"ing_{i}", "title": ing} for i, ing in enumerate(INGREDIENTES_LISTA)]
-            return self.wa.enviar_lista(wa_id, "Ingredientes", "Elige hasta 3 ingredientes incluidos:", "Paso 1/3", "Ver Lista", [{"title": "Opciones", "rows": rows}])
+            rows = [{"id": f"ing_{i}", "title": ing} for i, ing in enumerate(INGREDIENTES)]
+            # Agregamos opción para terminar si ya no quiere más
+            rows.append({"id": "fin_ing", "title": "🏁 Terminar selección", "description": "Usa esto si ya no quieres más ingredientes"})
+            
+            body = f"Has elegido Pizza {inter_id.capitalize()}.\n\nSelecciona tus ingredientes (3 incluidos, adicionales +$20):"
+            return self.wa.enviar_lista(wa_id, "Ingredientes", body, "Selecciona de la lista:", "Ver Ingredientes", [{"title": "Ingredientes", "rows": rows}])
 
         if s["paso"] == "INGREDIENTES":
-            ing_nombre = INGREDIENTES_LISTA[int(inter_id.split("_")[1])]
-            if ing_nombre not in s["pedido"]["ingredientes"]: s["pedido"]["ingredientes"].append(ing_nombre)
+            if inter_id == "fin_ing":
+                return self._pasar_a_extras(wa_id, s)
+            
+            ing_nombre = INGREDIENTES[int(inter_id.split("_")[1])]
+            if ing_nombre not in s["pedido"]["ingredientes"]:
+                s["pedido"]["ingredientes"].append(ing_nombre)
+                if len(s["pedido"]["ingredientes"]) > 3:
+                    s["total"] += 20 # Cobro extra
             
             cant = len(s["pedido"]["ingredientes"])
-            if cant < 3:
-                return self.wa.enviar_texto(wa_id, f"✅ {ing_nombre} añadido ({cant}/3). Elige otro de la lista arriba.")
-            
-            s["paso"] = "ENTREGA"
-            return self.wa.enviar_botones(wa_id, "¡Listo! ¿Cómo recibes tu pizza?", [{"id":"dom","title":"🛵 Domicilio"},{"id":"rec","title":"🛍️ Recoger"}])
+            body = f"✅ *{ing_nombre}* añadido ({cant}/3 gratis).\n\n¿Deseas agregar otro o terminar?"
+            buttons = [{"id":"fin_ing","title":"🏁 Terminar"}, {"id":"seguir","title":"➕ Otro ingrediente"}]
+            return self.wa.enviar_botones(wa_id, body, buttons)
 
-        if s["paso"] == "ENTREGA":
-            s["pedido"]["entrega"] = "domicilio" if inter_id == "dom" else "recogida"
-            if s["pedido"]["entrega"] == "recogida": return self.finalizar(wa_id, s, cliente)
+        # 3. EXTRAS
+        if s["paso"] == "EXTRAS":
+            if inter_id == "fin_ext":
+                return self._preguntar_entrega(wa_id, s, cliente)
+            
+            extra_data = MENU_EXTRAS.get(inter_id)
+            if extra_data:
+                s["pedido"]["extras"].append(inter_id)
+                s["total"] += extra_data
+                return self.wa.enviar_botones(wa_id, f"✅ *{inter_id.capitalize()}* añadido. ¿Algo más?", [{"id":"fin_ext","title":"🏁 Finalizar"}, {"id":"mas_ext","title":"🥤 Ver Extras"}])
+
+        # 4. ENTREGA Y DIRECCIÓN
+        if s["paso"] == "TIPO_ENTREGA":
+            s["pedido"]["entrega"] = "domicilio" if inter_id == "dom" else "recoger"
+            if inter_id == "rec": return self._finalizar_orden(wa_id, s, cliente)
             
             if cliente and cliente.ultima_direccion:
                 s["paso"] = "CONFIRMAR_DIR"
-                return self.wa.enviar_botones(wa_id, f"¿Enviamos a tu dirección guardada?\n📍 {cliente.ultima_direccion}", [{"id":"si_dir","title":"✅ Sí"},{"id":"no_dir","title":"❌ Otra"}])
+                msg = f"¿Usamos la dirección de tu último pedido?\n📍 {cliente.ultima_direccion}"
+                return self.wa.enviar_botones(wa_id, msg, [{"id":"dir_si","title":"✅ Sí"},{"id":"dir_no","title":"✏️ Nueva"}])
             
-            s["paso"] = "NOMBRE"
-            return self.wa.enviar_texto(wa_id, "Dime tu nombre para el pedido:")
+            s["paso"] = "PEDIR_NOMBRE"
+            return self.wa.enviar_texto(wa_id, "Para el envío, ¿cuál es tu nombre?")
 
-        if s["paso"] == "NOMBRE":
+        if s["paso"] == "PEDIR_NOMBRE":
             s["pedido"]["nombre"] = texto
-            s["paso"] = "DIRECCION"
-            return self.wa.enviar_texto(wa_id, "Ahora dime tu calle y número:")
+            s["paso"] = "PEDIR_DIR"
+            return self.wa.enviar_texto(wa_id, "Perfecto, ahora dime tu dirección completa:")
 
-        if s["paso"] == "DIRECCION":
+        if s["paso"] == "PEDIR_DIR":
             s["pedido"]["direccion"] = texto
-            self.actualizar_cliente(wa_id, s["pedido"]["nombre"], texto)
-            return self.finalizar(wa_id, s, cliente)
+            self._guardar_cliente(wa_id, s["pedido"].get("nombre"), texto)
+            return self._finalizar_orden(wa_id, s, cliente)
 
         if s["paso"] == "CONFIRMAR_DIR":
-            if inter_id == "si_dir":
+            if inter_id == "dir_si":
                 s["pedido"]["direccion"] = cliente.ultima_direccion
-                return self.finalizar(wa_id, s, cliente)
-            s["paso"] = "DIRECCION"
-            return self.wa.enviar_texto(wa_id, "Escribe la nueva dirección:")
+                return self._finalizar_orden(wa_id, s, cliente)
+            s["paso"] = "PEDIR_DIR"
+            return self.wa.enviar_texto(wa_id, "Dime la nueva dirección de entrega:")
 
-    def actualizar_cliente(self, tel, nom, dir):
+    # --- FUNCIONES AUXILIARES ---
+    def _pasar_a_extras(self, wa_id, s):
+        s["paso"] = "EXTRAS"
+        rows = [{"id": k, "title": k.capitalize(), "description": f"${v}"} for k, v in MENU_EXTRAS.items()]
+        rows.append({"id": "fin_ext", "title": "🏁 No, gracias", "description": "Continuar al pago"})
+        return self.wa.enviar_lista(wa_id, "Extras", "¿Gustas agregar algún extra o bebida?", "Mesa Code Pizza", "Ver Extras", [{"title": "Extras", "rows": rows}])
+
+    def _preguntar_entrega(self, wa_id, s, cliente):
+        s["paso"] = "TIPO_ENTREGA"
+        return self.wa.enviar_botones(wa_id, "¿Tu pedido es a domicilio o pasas a recoger?", [{"id":"dom","title":"🛵 Domicilio"},{"id":"rec","title":"🛍️ Recoger"}])
+
+    def _guardar_cliente(self, tel, nom, dir):
         c = Cliente.query.filter_by(telefono=tel).first()
         if not c: c = Cliente(telefono=tel)
         if nom: c.nombre = nom
@@ -87,11 +123,20 @@ class PizzeriaBot:
         db.session.add(c)
         db.session.commit()
 
-    def finalizar(self, wa_id, s, cliente):
-        total = MENU_PRECIOS[s["pedido"]["tamano"]]
-        ped = Pedido(cliente_id=cliente.id if cliente else None, total=total, detalles_json=json.dumps(s["pedido"]), tipo_entrega=s["pedido"]["entrega"])
-        db.session.add(ped)
+    def _finalizar_orden(self, wa_id, s, cliente):
+        # Crear registro en BD
+        p = Pedido(cliente_id=cliente.id if cliente else None, total=s["total"], detalles_json=json.dumps(s["pedido"]), tipo_entrega=s["pedido"]["entrega"])
+        db.session.add(p)
         db.session.commit()
-        resumen = f"✅ *Pedido Confirmado*\n🍕 {s['pedido']['tamano']}\n🧀 {', '.join(s['pedido']['ingredientes'])}\n💰 Total: ${total}\n⏳ Tiempo: *40 min*."
+
+        # Generar Ticket
+        ticket = f"🧾 *TICKET DE ORDEN #{p.id}*\n"
+        ticket += f"🍕 Pizza {s['pedido']['tamano'].capitalize()}\n"
+        ticket += f"🧀 Ingredientes: {', '.join(s['pedido']['ingredientes'])}\n"
+        if s["pedido"]["extras"]: ticket += f"🥤 Extras: {', '.join(s['pedido']['extras'])}\n"
+        ticket += f"📍 Entrega: {s['pedido']['entrega'].capitalize()}\n"
+        ticket += f"💰 *TOTAL: ${s['total']}*\n\n"
+        ticket += "⏳ Tiempo de espera: *40 minutos*.\n¡Gracias por tu compra!"
+        
         sesiones.pop(wa_id)
-        return self.wa.enviar_texto(wa_id, resumen)
+        return self.wa.enviar_texto(wa_id, ticket)
