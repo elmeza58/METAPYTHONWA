@@ -13,7 +13,7 @@ wa_service = WhatsAppService(app.config)
 bot = PizzeriaBot(app.config, wa_service)
 
 with app.app_context():
-    # Ya no borramos todo, solo nos aseguramos de que existan las tablas
+    # ELIMINADO db.drop_all() para conservar tus datos
     db.create_all()
 
 @app.route('/')
@@ -42,13 +42,12 @@ def webhook():
                 inter_id = msg['interactive'][type_i]['id']
                 text_input = msg['interactive'][type_i].get('title', "")
 
-            print(f"DEBUG: Input -> Text: {text_input} | ID: {inter_id}", flush=True)
-            bot.gestionar_mensaje(num, text_input, inter_id)
+            # Llamada corregida al nombre de la función del bot
+            bot.gestionar_pedido(num, text_input, inter_id)
             
         return "OK", 200
     except Exception as e:
-        # Esto te dirá el error real en los logs si algo falla
-        print(f"❌ ERROR EN WEBHOOK: {e}", flush=True)
+        print(f"❌ ERROR WEBHOOK: {e}")
         return "OK", 200
 
 if __name__ == '__main__':
