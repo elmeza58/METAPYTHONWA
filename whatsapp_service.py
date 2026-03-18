@@ -1,3 +1,4 @@
+# ~/Documents/APIMETAPYTHON/whatsapp_service.py
 import http.client
 import json
 
@@ -6,16 +7,29 @@ class WhatsAppService:
         self.config = config
 
     def _enviar(self, payload):
+        """Ejecuta la petición y muestra el error real de Meta en los logs."""
         token = self.config.get('WA_TOKEN')
         phone_id = self.config.get('WA_PHONE_NUMBER_ID')
-        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {token}"}
+        
+        headers = {
+            "Content-Type": "application/json", 
+            "Authorization": f"Bearer {token}"
+        }
         
         conn = http.client.HTTPSConnection("graph.facebook.com")
         try:
+            # Usamos v20.0
             conn.request("POST", f"/v20.0/{phone_id}/messages", json.dumps(payload), headers)
             res = conn.getresponse()
-            return res.status
-        except:
+            status = res.status
+            data = res.read().decode()
+            
+            # ESTA LÍNEA ES LA MÁS IMPORTANTE PARA TI AHORA:
+            print(f"DEBUG META API: Status {status} - Response: {data}", flush=True)
+            
+            return status
+        except Exception as e:
+            print(f"❌ ERROR DE CONEXIÓN A META: {str(e)}", flush=True)
             return 500
         finally:
             conn.close()
