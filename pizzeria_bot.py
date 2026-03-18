@@ -40,14 +40,12 @@ class PizzeriaBot:
                 db.session.add(cliente); db.session.commit()
 
             # --- LÓGICA DE NAVEGACIÓN VS RESET ---
-            # Si escribe HOLA manualmente: RESET total
             if texto.lower() == "hola" and inter_id is None:
                 cliente.paso_actual = "MENU_PRINCIPAL"
                 cliente.pedido_temporal = json.dumps({"pizzas": [], "extras": [], "total": 0})
                 db.session.commit()
                 return self._enviar_menu_principal(wa_id, 0)
 
-            # Si presiona botón 'hola' (Ver Menú): NO RESETEA el total
             if inter_id == "hola":
                 cliente.paso_actual = "MENU_PRINCIPAL"
                 db.session.commit()
@@ -70,7 +68,7 @@ class PizzeriaBot:
                     pedido["combo_activo"] = inter_id
                     cliente.paso_actual = "PIZZA_MODO"
                     cliente.pedido_temporal = json.dumps(pedido); db.session.commit()
-                    return self.wa.enviar_botones(wa_id, f"🎁 Combo añadido al carrito.\n💰 Total: *${pedido['total']}*\nConfiguremos la *Pizza 1*:", [{"id":"modo_full","title":"🍕 Completa"},{"id":"modo_mitad","title":"🌗 Mitad y Mitad"}])
+                    return self.wa.enviar_botones(wa_id, f"🎁 Combo añadido al carrito.\n💰 Total: *${pedido['total']}*\n\nConfiguremos la *Pizza 1*:", [{"id":"modo_full","title":"🍕 Completa"},{"id":"modo_mitad","title":"🌗 Mitad y Mitad"}])
                 
                 elif inter_id in MENU_SNACKS:
                     pedido["item_en_proceso"] = inter_id
@@ -141,12 +139,31 @@ class PizzeriaBot:
                 elif inter_id and ("_prot_" in inter_id or "_veg_" in inter_id):
                     partes = inter_id.split("_"); tipo, idx = partes[1], int(partes[2])
                     ing = INGREDIENTES_PROT[idx] if tipo == "prot" else INGREDIENTES_VEG[idx]
+                    
                     if "armando" not in pedido: pedido["armando"] = []
                     if ing not in pedido["armando"]:
                         pedido["armando"].append(ing)
+                        # Cobro extra después del 5to
                         if len(pedido["armando"]) > 5: pedido["total"] += 20
+                    
                     cliente.pedido_temporal = json.dumps(pedido); db.session.commit()
-                    return self.wa.enviar_botones(wa_id, f"✅ {ing} añadido.\n📝 Llevas: {', '.join(pedido['armando'])}\n💰 Total actual: *${pedido['total']}*", [{"id":"cat_prot","title":"🥩 Proteínas"},{"id":"cat_veg","title":"🌿 Vegetales"},{"id":"fin_pizza","title":"🏁 Terminar"}])
+                    
+                    # --- NUEVA LÓGICA DE MENSAJE CON CONTADOR ---
+                    cant = len(pedido["armando"])
+                    llevas = ", ".join(pedido["armando"])
+                    
+                    mensaje = (
+                        f"✅ *{ing}* añadido ({cant}/5).\n\n"
+                        f"📝 *Llevas:* {llevas}\n"
+                        f"💰 *Total actual:* ${pedido['total']}"
+                    )
+                    
+                    return self.wa.enviar_botones(wa_id, mensaje, [
+                        {"id":"cat_prot","title":"🥩 Proteínas"},
+                        {"id":"cat_veg","title":"🌿 Vegetales"},
+                        {"id":"fin_pizza","title":"🏁 Terminar"}
+                    ])
+
                 elif inter_id == "fin_pizza":
                     return self._procesar_seleccion_sabor(wa_id, cliente, pedido, "Armada", pedido.pop("armando", []))
 
@@ -262,7 +279,7 @@ class PizzeriaBot:
 
     def _enviar_ingredientes(self, wa_id, lista, nombre_cat, prefijo):
         rows = [{"id": f"ing_{prefijo}_{i}", "title": ing} for i, ing in enumerate(lista)]
-        return self.wa.enviar_lista(wa_id, f"Lista: {nombre_cat}", "Selecciona:", "Bigo's", "Ver Lista", [{"title":nombre_cat, "rows":rows}])
+        return self.wa.enviar_lista(wa_id, f"Lista: {nombre_cat}", "Selecciona uno:", "Bigo's", "Ver Lista", [{"title":nombre_cat, "rows":rows}])
 
     def _finalizar_orden(self, wa_id, cliente, pedido):
         p = Pedido(cliente_id=cliente.id, total=pedido["total"], detalles_json=json.dumps(pedido), tipo_entrega=pedido["tipo_entrega"])
