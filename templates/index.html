@@ -33,7 +33,7 @@
                             {% for registro in registros %}
                             <tr>
                                 <td>{{ registro.id }}</td>
-                                <td>{{ registro.fecha_pedido.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                                <td>{{ registro.fecha.strftime('%Y-%m-%d %H:%M:%S') }}</td>
                                 <td>{{ registro.cliente.nombre or 'Nuevo' }}</td>
                                 <td>{{ registro.cliente.telefono }}</td>
                                 <td>
