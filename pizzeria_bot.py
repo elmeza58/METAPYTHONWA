@@ -39,7 +39,6 @@ class PizzeriaBot:
                 cliente = Cliente(telefono=wa_id, paso_actual="INICIO")
                 db.session.add(cliente); db.session.commit()
 
-            # --- LÓGICA DE NAVEGACIÓN VS RESET ---
             if texto.lower() == "hola" and inter_id is None:
                 cliente.paso_actual = "MENU_PRINCIPAL"
                 cliente.pedido_temporal = json.dumps({"pizzas": [], "extras": [], "total": 0})
@@ -143,19 +142,23 @@ class PizzeriaBot:
                     if "armando" not in pedido: pedido["armando"] = []
                     if ing not in pedido["armando"]:
                         pedido["armando"].append(ing)
-                        # Cobro extra después del 5to
                         if len(pedido["armando"]) > 5: pedido["total"] += 20
                     
                     cliente.pedido_temporal = json.dumps(pedido); db.session.commit()
                     
-                    # --- NUEVA LÓGICA DE MENSAJE CON CONTADOR ---
                     cant = len(pedido["armando"])
                     llevas = ", ".join(pedido["armando"])
+                    
+                    # --- LÓGICA DE AVISO POR COSTO EXTRA ---
+                    aviso_extra = ""
+                    if cant == 5:
+                        aviso_extra = "\n\n⚠️ *Nota:* El próximo ingrediente tendrá un costo extra de $20."
                     
                     mensaje = (
                         f"✅ *{ing}* añadido ({cant}/5).\n\n"
                         f"📝 *Llevas:* {llevas}\n"
                         f"💰 *Total actual:* ${pedido['total']}"
+                        f"{aviso_extra}"
                     )
                     
                     return self.wa.enviar_botones(wa_id, mensaje, [
