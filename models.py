@@ -1,17 +1,22 @@
+# /Users/alejandromeza/WA_BOT_PROJECTN/models.py
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
-import json
 
 db = SQLAlchemy()
 
 class Cliente(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     telefono = db.Column(db.String(20), unique=True, nullable=False)
+    # Datos de Registro
     nombre = db.Column(db.String(100))
-    ultima_direccion = db.Column(db.Text)
-    # Persistencia de estado
+    apellido = db.Column(db.String(100))
+    calle = db.Column(db.String(150))
+    numero = db.Column(db.String(20))
+    cruzamientos = db.Column(db.String(200))
+    referencia = db.Column(db.Text)
+    
     paso_actual = db.Column(db.String(50), default="INICIO")
-    pedido_temporal = db.Column(db.Text, default='{"ingredientes": [], "extras": [], "total": 0}')
+    pedido_temporal = db.Column(db.Text, default='{"pizzas": [], "extras": [], "total": 0}')
 
 class Pedido(db.Model):
     id = db.Column(db.Integer, primary_key=True)
