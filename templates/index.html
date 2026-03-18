@@ -2,44 +2,47 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Mr. Bigo's Pizza - Panel</title>
+    <title>Mr. Bigo's Pizza - Pedidos</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
-        .badge-pizza { background: #d35400; color: white; margin-bottom: 3px; display: block; padding: 8px; border-radius: 5px; }
-        .badge-extra { background: #2980b9; color: white; padding: 5px; border-radius: 3px; font-size: 0.8em; margin-right: 3px; }
+        .badge-pizza { background: #e67e22; color: white; display: block; margin-bottom: 4px; padding: 6px; border-radius: 4px; font-size: 0.85em; }
+        .badge-extra { background: #3498db; color: white; padding: 4px 8px; border-radius: 10px; font-size: 0.75em; margin-right: 4px; }
+        .text-total { color: #27ae60; font-weight: bold; font-size: 1.1em; }
     </style>
 </head>
 <body class="bg-light">
-    <div class="container mt-4">
-        <h2 class="text-center mb-4">🍕 Panel de Pedidos Mr. Bigo's</h2>
-        <div class="table-responsive bg-white shadow rounded">
-            <table class="table table-hover mb-0">
+    <div class="container py-5">
+        <h2 class="text-center mb-4">🍕 Panel Administrativo Mr. Bigo's</h2>
+        <div class="table-responsive bg-white shadow-sm rounded">
+            <table class="table table-hover align-middle">
                 <thead class="table-dark">
                     <tr>
-                        <th>Orden</th>
+                        <th>#</th>
+                        <th>Fecha</th>
                         <th>Cliente</th>
-                        <th>Detalle de Pizzas</th>
-                        <th>Extras / Snacks</th>
+                        <th>Pizzas</th>
+                        <th>Acompañamientos</th>
                         <th>Total</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for r in registros %}
                     <tr>
-                        <td><strong>#{{ r.id }}</strong><br><small>{{ r.fecha.strftime('%H:%M') }}</small></td>
+                        <td><strong>{{ r.id }}</strong></td>
+                        <td>{{ r.fecha.strftime('%H:%M') }}</td>
                         <td>{{ r.cliente }}<br><small class="text-muted">{{ r.telefono }}</small></td>
                         <td>
                             {% for p in r.pizzas %}
-                                <span class="badge-pizza">{{ p }}</span>
+                            <span class="badge-pizza">🍕 {{ p }}</span>
                             {% endfor %}
                         </td>
                         <td>
                             {% for e in r.extras %}
-                                <span class="badge badge-extra">{{ e }}</span>
+                            <span class="badge badge-extra">{{ e }}</span>
                             {% endfor %}
-                            <br><small class="text-info">📍 {{ r.direccion }}</small>
+                            <br><small class="text-muted">📍 {{ r.direccion }}</small>
                         </td>
-                        <td class="text-danger"><strong>${{ "%.2f"|format(r.total) }}</strong></td>
+                        <td class="text-total">${{ "%.2f"|format(r.total) }}</td>
                     </tr>
                     {% endfor %}
                 </tbody>
