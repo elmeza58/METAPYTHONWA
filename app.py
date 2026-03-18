@@ -1,4 +1,3 @@
-# ~/Documents/APIMETAPYTHON/app.py
 import os, json
 from flask import Flask, request, render_template
 from config import Config
@@ -19,26 +18,16 @@ with app.app_context():
 @app.route('/')
 def index():
     pedidos = Pedido.query.order_by(Pedido.fecha.desc()).all()
-    # Procesar los datos para que el HTML los lea fácil
-    registros_limpios = []
+    registros = []
     for p in pedidos:
-        detalles = json.loads(p.detalles_json)
-        resumen_pizzas = []
-        for pizza in detalles.get('pizzas', []):
-            resumen_pizzas.append(f"{pizza['nombre']} ({', '.join(pizza['ingredientes'])})")
-        
-        registros_limpios.append({
-            "id": p.id,
-            "fecha": p.fecha,
-            "cliente": p.cliente.nombre or "Cliente WA",
-            "telefono": p.cliente.telefono,
-            "tipo_entrega": p.tipo_entrega,
-            "total": p.total,
-            "pizzas": resumen_pizzas,
-            "extras": detalles.get('extras', []),
-            "direccion": detalles.get('direccion', 'Recoge en local')
+        d = json.loads(p.detalles_json)
+        pizzas = [f"{pz['nombre']} ({', '.join(pz['ingredientes'])})" for pz in d.get('pizzas', [])]
+        registros.append({
+            "id": p.id, "fecha": p.fecha, "cliente": p.cliente.nombre or "Cliente WA",
+            "telefono": p.cliente.telefono, "total": p.total, "pizzas": pizzas,
+            "extras": d.get('extras', []), "direccion": d.get('direccion', 'Recoger')
         })
-    return render_template('index.html', registros=registros_limpios)
+    return render_template('index.html', registros=registros)
 
 @app.route('/webhook', methods=['GET', 'POST'])
 def webhook():
@@ -63,7 +52,7 @@ def webhook():
             bot.gestionar_pedido(num, text_input, inter_id)
         return "OK", 200
     except Exception as e:
-        print(f"❌ ERROR: {e}", flush=True)
+        print(f"❌ ERROR WEBHOOK: {e}", flush=True)
         return "OK", 200
 
 if __name__ == '__main__':
