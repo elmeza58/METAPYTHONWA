@@ -1,7 +1,6 @@
 from models import db, Cliente, Pedido
 import json
 
-# --- DATOS DEL NEGOCIO ---
 MENU_PIZZAS = {"familiar": 150, "mediana": 130, "chica": 80}
 MENU_EXTRAS = {"spagguetti": 80, "ensalada": 60, "queso": 100, "soda": 50}
 INGREDIENTES = [
@@ -16,18 +15,16 @@ class PizzeriaBot:
         self.config = config
 
     def gestionar_pedido(self, wa_id, texto, inter_id=None):
-        """Controlador principal del flujo."""
-        # Limpiar número México
+        """Nombre unificado para evitar errores de atributo."""
         if wa_id.startswith("521"): wa_id = "52" + wa_id[3:]
         
-        # Obtener o crear cliente
         cliente = Cliente.query.filter_by(telefono=wa_id).first()
         if not cliente:
             cliente = Cliente(telefono=wa_id, paso_actual="INICIO")
             db.session.add(cliente)
             db.session.commit()
 
-        # Reiniciar con HOLA
+        # Reiniciar si el usuario escribe HOLA
         if texto.lower() == "hola":
             cliente.paso_actual = "MENU_PRINCIPAL"
             cliente.pedido_temporal = json.dumps({"ingredientes": [], "extras": [], "total": 0})
@@ -37,7 +34,7 @@ class PizzeriaBot:
         paso = cliente.paso_actual
         pedido = json.loads(cliente.pedido_temporal)
 
-        # --- LÓGICA DE ESTADOS (ELIF para evitar errores) ---
+        # --- LÓGICA DE ESTADOS ---
         
         if paso == "MENU_PRINCIPAL":
             if inter_id == "ver_pizzas":
@@ -49,7 +46,7 @@ class PizzeriaBot:
                 pedido["total"] += MENU_EXTRAS[inter_id]
                 cliente.pedido_temporal = json.dumps(pedido)
                 db.session.commit()
-                return self.wa.enviar_botones(wa_id, f"✅ *{inter_id.capitalize()}* añadido. ¿Algo más?", 
+                return self.wa.enviar_botones(wa_id, f"✅ *{inter_id.capitalize()}* añadido. ¿Deseas algo más?", 
                                            [{"id":"hola","title":"Ver Menú"},{"id":"pagar","title":"💳 Pagar"}])
 
         elif paso == "PIZZA_TAMANO":
@@ -62,10 +59,10 @@ class PizzeriaBot:
                 return self._enviar_ingredientes(wa_id, "Elige tu 1er ingrediente (3 incluidos):")
 
         elif paso == "PIZZA_INGREDIENTES":
-            if inter_id == "fin_ing" or texto == "🏁 Terminar":
+            if inter_id == "fin_ing":
                 cliente.paso_actual = "MENU_PRINCIPAL"
                 db.session.commit()
-                return self.wa.enviar_botones(wa_id, "🍕 Pizza lista. ¿Algo más o pasamos al pago?", 
+                return self.wa.enviar_botones(wa_id, "🍕 Pizza configurada. ¿Algo más o pasamos al pago?", 
                                            [{"id":"hola","title":"🥤 Ver Extras"},{"id":"pagar","title":"💳 Pagar"}])
             
             if inter_id and inter_id.startswith("ing_"):
@@ -77,12 +74,14 @@ class PizzeriaBot:
                 
                 cliente.pedido_temporal = json.dumps(pedido)
                 db.session.commit()
+                
                 msg = f"✅ *{ing}* añadido ({len(pedido['ingredientes'])}/3 gratis). ¿Otro o terminamos?"
                 return self.wa.enviar_botones(wa_id, msg, [{"id":"otro_ing","title":"➕ Otro"},{"id":"fin_ing","title":"🏁 Terminar"}])
             
-            if texto == "➕ Otro": return self._enviar_ingredientes(wa_id, "Elige el siguiente ingrediente:")
+            if texto == "➕ Otro":
+                return self._enviar_ingredientes(wa_id, "Selecciona el siguiente ingrediente:")
 
-        # --- PAGO Y ENTREGA ---
+        # --- FLUJO DE PAGO Y DIRECCIÓN ---
         if inter_id == "pagar" or texto.lower() == "pagar":
             cliente.paso_actual = "ENTREGA"
             db.session.commit()
@@ -103,16 +102,12 @@ class PizzeriaBot:
             return self.wa.enviar_texto(wa_id, "Dime tu dirección completa para el envío:")
 
         elif paso == "DIRECCION" or paso == "CONFIRMAR_DIR":
-            if inter_id == "no_dir": 
-                return self.wa.enviar_texto(wa_id, "Dime la nueva dirección:")
-            
             direccion = cliente.ultima_direccion if inter_id == "si_dir" else texto
             pedido["direccion"] = direccion
             cliente.ultima_direccion = direccion
             db.session.commit()
             return self._finalizar_orden(wa_id, cliente, pedido)
 
-    # --- MÉTODOS DE APOYO ---
     def _enviar_menu_principal(self, wa_id, cliente):
         nombre = cliente.nombre if cliente.nombre else "amigo"
         sections = [
@@ -134,9 +129,10 @@ class PizzeriaBot:
         db.session.add(p)
         cliente.paso_actual = "INICIO"
         db.session.commit()
+        
         ticket = f"🧾 *ORDEN #{p.id}*\n"
         if "tamano" in pedido: ticket += f"🍕 Pizza {pedido['tamano'].capitalize()}\n"
         ticket += f"🧀 Ing: {', '.join(pedido['ingredientes'])}\n"
         if pedido['extras']: ticket += f"🥤 Ext: {', '.join(pedido['extras'])}\n"
-        ticket += f"💰 *TOTAL: ${pedido['total']}*\n⏳ Espera: *40 min*."
+        ticket += f"💰 *TOTAL: ${pedido['total']}*\n⏳ Espera: *40 min*.\n¡Gracias!"
         return self.wa.enviar_texto(wa_id, ticket)
