@@ -165,13 +165,35 @@ class PizzeriaBot:
         ]
         return self.wa.enviar_lista(wa_id, "Mr. Bigo's Pizza", "¡Bienvenido! Elige una opción:", "Menú", "Ver Opciones", sections)
 
+    # ~/Documents/APIMETAPYTHON/pizzeria_bot.py
+
     def _enviar_especialidades(self, wa_id):
         cliente = Cliente.query.filter_by(telefono=wa_id).first()
         cliente.paso_actual = "PIZZA_ESPECIALIDAD"
         db.session.commit()
-        rows = [{"id": f"esp_{k.lower().replace(' ', '_')}", "title": k, "description": ", ".join(v)} for k, v in ESPECIALIDADES.items()]
-        return self.wa.enviar_lista(wa_id, "Especialidades", "Selecciona una:", "Mr. Bigo's", "Ver Lista", [{"title":"Nuestras Pizzas", "rows":rows}])
-
+        
+        rows = []
+        for k, v in ESPECIALIDADES.items():
+            # Creamos la descripción con los ingredientes
+            desc = ", ".join(v)
+            # ⚠️ REGLA DE META: Máximo 72 caracteres. Recortamos a 69 + "..." si es necesario.
+            if len(desc) > 72:
+                desc = desc[:69] + "..."
+                
+            rows.append({
+                "id": f"esp_{k.lower().replace(' ', '_')}", 
+                "title": k, 
+                "description": desc
+            })
+            
+        return self.wa.enviar_lista(
+            wa_id, 
+            "Especialidades", 
+            "Selecciona una:", 
+            "Mr. Bigo's", 
+            "Ver Lista", 
+            [{"title": "Nuestras Pizzas", "rows": rows}]
+        )
     def _enviar_tamanos(self, wa_id):
         rows = [{"id": k, "title": k.capitalize(), "description": f"${v}"} for k, v in MENU_PIZZAS.items() if k != "promo_pepperoni"]
         return self.wa.enviar_lista(wa_id, "Tamaños", "Elige el tamaño:", "Pizzas", "Seleccionar", [{"title":"Opciones", "rows":rows}])
