@@ -13,6 +13,7 @@ wa_service = WhatsAppService(app.config)
 bot = PizzeriaBot(app.config, wa_service)
 
 with app.app_context():
+    db.drop_all()
     db.create_all()
 
 @app.route('/')
