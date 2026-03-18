@@ -37,11 +37,10 @@
                                 <td>{{ registro.cliente.nombre or 'Nuevo' }}</td>
                                 <td>{{ registro.cliente.telefono }}</td>
                                 <td>
-                                    {{ '🛵' if registro.tipo_entrega == 'domicilio' else '🛍️' }}
-                                    {{ 'A Domicilio' if registro.tipo_entrega == 'domicilio' else 'Recoger' }}
+                                    {% if registro.tipo_entrega == 'domicilio' %} 🛵 A Domicilio {% else %} 🛍️ Recoger {% endif %}
                                 </td>
-                                <td>$ {{ registro.costo_total | format('%.2f') }}</td>
-                                <td><pre class="table-pre p-2 rounded">{{ registro.items_json }}</pre></td>
+                                <td>$ {{ "%.2f"|format(registro.total) }}</td>
+                                <td><pre class="table-pre p-2 rounded">{{ registro.detalles_json }}</pre></td>
                             </tr>
                             {% else %}
                             <tr>
