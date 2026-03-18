@@ -49,16 +49,17 @@ def webhook():
             # 1. Detectar si es texto normal
             if 'text' in msg:
                 text_input = msg['text']['body']
-            
-            # 2. Detectar si es una interacción (Botón o Lista)
             elif 'interactive' in msg:
-                type_i = msg['interactive']['type'] # 'button_reply' o 'list_reply'
+                type_i = msg['interactive']['type']
                 inter_id = msg['interactive'][type_i]['id']
+                # SOLO tomamos el texto si NO es un ID conocido, 
+                # pero para estados es mejor priorizar el ID.
                 text_input = msg['interactive'][type_i].get('title', "")
 
-            # 3. Mandar al cerebro del bot
-            if text_input or inter_id:
-                bot.gestionar_mensaje(num, text_input, inter_id)
+            # Log para que veas en Render qué está llegando
+            print(f"DEBUG: Input -> Text: {text_input} | ID: {inter_id}", flush=True)
+            
+            bot.gestionar_mensaje(num, text_input, inter_id)
         
         return "OK", 200
         
